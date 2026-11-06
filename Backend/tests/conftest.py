@@ -79,14 +79,15 @@ def mailer():
 
 @pytest.fixture
 def build(store, database_url):
-    """Builds a TestClient. Pass setting overrides, send_email and verify_google."""
+    """Builds a TestClient. Pass setting overrides, send_email, verify_google and scan_target."""
 
-    def _build(send_email=None, verify_google=None, **overrides):
+    def _build(send_email=None, verify_google=None, scan_target=None, **overrides):
         app = create_app(
             make_settings(database_url, **overrides),
             store=store,
             send_email=send_email,
             verify_google=verify_google or refuse_google,
+            scan_target=scan_target or (lambda user: None),
         )
         return TestClient(app)
 

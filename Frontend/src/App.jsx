@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard.jsx'
 import ForgotPassword from './pages/ForgotPassword.jsx'
 import Landing from './pages/Landing.jsx'
 import ResetPassword from './pages/ResetPassword.jsx'
+import ScanPage from './pages/ScanPage.jsx'
 
 // Where to go after signing in, from ?next=. Only a path on this site, so the link can't send anyone elsewhere.
 function nextPath(search) {
@@ -63,6 +64,7 @@ export default function App() {
           <Route path="/register" element={signedOutOnly(<Auth mode="register" onSignedIn={signedIn} />)} />
           <Route path="/forgot-password" element={user ? <Navigate to="/account" replace /> : <ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/scans/:id" element={signedInOnly(<ScanPage />)} />
           <Route path="/account" element={signedInOnly(<Account user={user} onSession={applySession} />)} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

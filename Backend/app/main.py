@@ -1,10 +1,10 @@
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 
 import jwt
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -12,6 +12,9 @@ from pydantic import AfterValidator, BaseModel, EmailStr, Field
 
 from .config import load_settings
 from .mailer import smtp_sender
+from .scanner import CHECKS, run_scan
+from .scanner.scoring import summarize
+from .scans import catalog, grouped_checks, no_target, scan_view
 from .store import Store
 
 logger = logging.getLogger(__name__)
@@ -34,7 +37,13 @@ RATE_LIMITS = {
     "reset_email": (3, timedelta(hours=1), None),
     "reset_all": (200, timedelta(days=1), "Password reset is busy today. Please try again tomorrow."),
     "reset_use": (20, timedelta(hours=1), BUSY),
+    "scan": (20, timedelta(hours=1), "You've run a lot of scans this hour. Please try again a little later."),
 }
+NO_TARGET = "Connect an AWS account before running a scan."
+SCAN_RUNNING = "A scan is already running. Wait for it to finish, then try again."
+SCAN_FAILED = "The scan couldn't finish because AWS didn't respond as expected. Please try again."
+SCAN_NOT_FOUND = "Scan not found"
+Severity = Literal["critical", "high", "medium", "low"]
 
 
 def verify_google_token(credential, client_id):
@@ -96,7 +105,7 @@ def public_user(user):
     }
 
 
-def create_app(settings=None, *, store=None, send_email=None, verify_google=verify_google_token):
+def create_app(settings=None, *, store=None, send_email=None, verify_google=verify_google_token, scan_target=no_target):
     settings = settings or load_settings()
     if send_email is None and settings["smtp"]:
         send_email = smtp_sender(**settings["smtp"])
@@ -243,5 +252,55 @@ def create_app(settings=None, *, store=None, send_email=None, verify_google=veri
         if not store.reset_password(body.token, body.new_password):
             raise HTTPException(status_code=400, detail=RESET_INVALID)
         return {"ok": True}
+
+    # Scans
+
+    @app.get("/api/checks")
+    def checks():
+        return {"checks": catalog()}
+
+    @app.post("/api/scans", status_code=201)
+    def start_scan(user=Depends(current_user)):
+        target = scan_target(user)
+        if target is None:
+            raise HTTPException(status_code=409, detail=NO_TARGET)
+        enforce_limit("scan", user["id"])
+        scan = store.start_scan(user["id"], target.source)
+        if scan is None:
+            raise HTTPException(status_code=409, detail=SCAN_RUNNING)
+        try:
+            result = run_scan(target.session, target.regions)
+        except Exception:
+            logger.exception("Scan %s failed", scan["id"])
+            store.fail_scan(scan["id"], SCAN_FAILED)
+            raise HTTPException(status_code=502, detail=SCAN_FAILED)
+        severities = {check_id: c.severity for check_id, c in CHECKS.items()}
+        scan = store.finish_scan(scan["id"], result, summarize(result.findings), severities)
+        return scan_view(scan)
+
+    @app.get("/api/scans")
+    def list_scans(user=Depends(current_user)):
+        return {"scans": [scan_view(s) for s in store.list_scans(user["id"])]}
+
+    @app.get("/api/scans/{scan_id}")
+    def get_scan(
+        scan_id: str,
+        severity: Annotated[list[Severity] | None, Query()] = None,
+        service: Annotated[str | None, Query(max_length=40)] = None,
+        status: Literal["fail", "pass", "error"] | None = None,
+        user=Depends(current_user),
+    ):
+        try:
+            scan_uuid = uuid.UUID(scan_id)
+        except ValueError:
+            raise HTTPException(status_code=404, detail=SCAN_NOT_FOUND)
+        scan, rows = store.get_scan(user["id"], scan_uuid)
+        if scan is None:
+            raise HTTPException(status_code=404, detail=SCAN_NOT_FOUND)
+        return {
+            "scan": scan_view(scan),
+            "services": sorted({CHECKS[r["check_id"]].service for r in rows if r["check_id"] in CHECKS}),
+            "checks": grouped_checks(rows, scan["account_id"], set(severity or []), service, status),
+        }
 
     return app

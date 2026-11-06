@@ -4,15 +4,15 @@ import { api } from '../api.js'
 
 const STEPS = [
   ['Connect', 'Deploy a one-click CloudFormation template. It creates a read-only role for Misconfigly, so no access keys are ever shared or stored.'],
-  ['Scan', 'About 30 checks from the CIS AWS Foundations Benchmark cover IAM, S3, EC2, RDS, CloudTrail, GuardDuty and more.'],
+  ['Scan', '37 checks from the CIS AWS Foundations Benchmark cover IAM, S3, EC2, RDS, CloudTrail, AWS Config and more.'],
   ['Fix', 'Each finding says why it matters and how to fix it, with console steps, an AWS CLI command and Terraform.'],
 ]
 
 // A made-up example, labelled as such on the page.
 const EXAMPLE = [
   ['critical', 'S3 bucket is public', 'acme-invoices-prod'],
+  ['critical', 'Root account has no MFA', 'account root'],
   ['high', 'SSH open to the internet', 'sg-0a41f2 · web-servers'],
-  ['high', 'Root account has no MFA', 'account root'],
   ['medium', 'Access key older than 90 days', 'ci-deploy'],
 ]
 

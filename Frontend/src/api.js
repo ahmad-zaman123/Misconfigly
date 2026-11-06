@@ -69,4 +69,7 @@ export const api = {
   me: () => request('/me'),
   changePassword: (current_password, new_password) =>
     request('/me/password', { method: 'POST', json: { current_password, new_password } }),
+  scans: () => request('/scans'),
+  scan: (id) => request(`/scans/${encodeURIComponent(id)}`),
+  startScan: () => request('/scans', { method: 'POST' }),
 }

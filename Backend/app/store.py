@@ -7,13 +7,18 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 import psycopg
+from psycopg.errors import UniqueViolation
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 # Longer than a session lasts, so nobody loses a demo they are still using.
 DEMO_LIFETIME = timedelta(days=2)
 # Old demos are removed in batches each time a new one starts, so no single request does too much.
 DEMO_PURGE_BATCH = 50
+# A scan still marked running after this died with its request, so it no longer blocks a new one.
+SCAN_TIMEOUT = timedelta(minutes=10)
+SCAN_COLUMNS = "id, source, status, account_id, regions, summary, error, started_at, finished_at"
 # Short, because anyone who sees the link in the inbox can use it.
 RESET_TOKEN_LIFETIME = timedelta(minutes=15)
 POOL_OPEN_TIMEOUT = 10
@@ -42,6 +47,32 @@ CREATE TABLE IF NOT EXISTS rate_limits (
     hits INTEGER NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL
 );
+CREATE TABLE IF NOT EXISTS scans (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running',
+    account_id TEXT,
+    regions TEXT[] NOT NULL DEFAULT '{}',
+    summary JSONB,
+    error TEXT,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS scans_user_idx ON scans (user_id, started_at DESC);
+-- One running scan per user, enforced by the database so two requests can't both start one.
+CREATE UNIQUE INDEX IF NOT EXISTS scans_one_running_idx ON scans (user_id) WHERE status = 'running';
+CREATE TABLE IF NOT EXISTS findings (
+    id BIGSERIAL PRIMARY KEY,
+    scan_id UUID NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
+    check_id TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    status TEXT NOT NULL,
+    region TEXT,
+    resource TEXT NOT NULL,
+    detail TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS findings_scan_idx ON findings (scan_id);
 """
 
 
@@ -229,3 +260,70 @@ class Store:
                 {"key": key, "window": window},
             ).fetchone()
         return max(1, int(row["wait"])) if row["hits"] > limit else None
+
+    # Scans
+
+    def start_scan(self, user_id, source):
+        """A new running scan, or None while another scan for this user is still running."""
+        with self._connect() as db:
+            db.execute(
+                "UPDATE scans SET status = 'failed', error = %s, finished_at = now() "
+                "WHERE user_id = %s AND status = 'running' AND started_at < %s",
+                ("The scan stopped before it finished.", user_id, datetime.now(timezone.utc) - SCAN_TIMEOUT),
+            )
+            try:
+                with db.transaction():
+                    return db.execute(
+                        f"INSERT INTO scans (id, user_id, source) VALUES (%s, %s, %s) RETURNING {SCAN_COLUMNS}",
+                        (uuid.uuid4(), user_id, source),
+                    ).fetchone()
+            except UniqueViolation:
+                return None
+
+    def finish_scan(self, scan_id, result, summary, severities):
+        """Saves the findings of a ScanResult. `severities` maps each check id to its severity."""
+        rows = [
+            (scan_id, f.check_id, severities[f.check_id], f.status, f.region, f.resource, f.detail)
+            for f in result.findings
+        ]
+        with self._connect() as db:
+            with db.transaction():
+                with db.cursor() as cursor:
+                    cursor.executemany(
+                        "INSERT INTO findings (scan_id, check_id, severity, status, region, resource, detail) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                        rows,
+                    )
+                return db.execute(
+                    "UPDATE scans SET status = 'done', account_id = %s, regions = %s, summary = %s, finished_at = now() "
+                    f"WHERE id = %s RETURNING {SCAN_COLUMNS}",
+                    (result.account_id, result.regions, Jsonb(summary), scan_id),
+                ).fetchone()
+
+    def fail_scan(self, scan_id, error):
+        with self._connect() as db:
+            return db.execute(
+                f"UPDATE scans SET status = 'failed', error = %s, finished_at = now() WHERE id = %s RETURNING {SCAN_COLUMNS}",
+                (error, scan_id),
+            ).fetchone()
+
+    def list_scans(self, user_id, limit=50):
+        with self._connect() as db:
+            return db.execute(
+                f"SELECT {SCAN_COLUMNS} FROM scans WHERE user_id = %s ORDER BY started_at DESC LIMIT %s",
+                (user_id, limit),
+            ).fetchall()
+
+    def get_scan(self, user_id, scan_id):
+        """The scan and its findings, or (None, []) if this user has no such scan."""
+        with self._connect() as db:
+            scan = db.execute(
+                f"SELECT {SCAN_COLUMNS} FROM scans WHERE id = %s AND user_id = %s", (scan_id, user_id)
+            ).fetchone()
+            if scan is None:
+                return None, []
+            findings = db.execute(
+                "SELECT check_id, severity, status, region, resource, detail FROM findings WHERE scan_id = %s ORDER BY id",
+                (scan_id,),
+            ).fetchall()
+        return scan, findings
