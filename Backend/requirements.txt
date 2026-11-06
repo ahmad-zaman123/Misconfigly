@@ -6,3 +6,4 @@ google-auth==2.62.0
 psycopg[binary]==3.3.6
 psycopg-pool==3.3.3
 PyJWT==2.15.1
+boto3==1.43.125
