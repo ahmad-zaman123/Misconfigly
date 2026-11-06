@@ -25,7 +25,7 @@ function scoreTone(score) {
   return 'poor'
 }
 
-function CopyButton({ text }) {
+export function CopyButton({ text }) {
   const [copied, setCopied] = useState(false)
   async function copy() {
     try {

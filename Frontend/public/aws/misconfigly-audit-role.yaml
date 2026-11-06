@@ -1,0 +1,45 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  A read-only role that lets Misconfigly audit this AWS account. It can read settings, not data, and only
+  Misconfigly's scanner can use it, with your ExternalId. Delete this stack to remove Misconfigly's access.
+
+Parameters:
+  ExternalId:
+    Type: String
+    MinLength: 16
+    MaxLength: 128
+    AllowedPattern: "[\\w+=,.@:/-]+"
+    Description: The ExternalId from Misconfigly's Connect page. It stops anyone else using this role through Misconfigly.
+  MisconfiglyRoleArn:
+    Type: String
+    AllowedPattern: "arn:aws:iam::\\d{12}:role/.+"
+    Description: Misconfigly's scanner role, the only identity allowed to assume this role.
+
+Resources:
+  AuditRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: MisconfiglyAudit
+      Description: Read-only access for Misconfigly security scans
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Ref: MisconfiglyRoleArn
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId:
+                  Ref: ExternalId
+      ManagedPolicyArns:
+        # AWS's own read-only policy for security audits. It reads configuration, never the contents of buckets or databases.
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/SecurityAudit
+
+Outputs:
+  RoleArn:
+    Description: Paste this into Misconfigly
+    Value:
+      Fn::GetAtt: [AuditRole, Arn]

@@ -278,6 +278,33 @@ select {
 .button.small { min-height: 34px; padding: 0 14px; font-size: 0.9rem; }
 .demo-fix { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 12px; }
 .demo-fix .hint { margin: 0; }
+
+/* Connect AWS */
+.page.narrow { width: min(760px, 100%); }
+.break { overflow-wrap: anywhere; }
+.connect-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; counter-reset: step; }
+.connect-step { padding: 24px; counter-increment: step; }
+.connect-step h2 { font-size: 1.1rem; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; }
+.connect-steps .connect-step h2::before {
+  content: counter(step); display: inline-grid; place-items: center; width: 24px; height: 24px; flex: none;
+  border-radius: 50%; border: 1.5px solid var(--accent); color: var(--accent); font-size: 0.8rem;
+}
+.connect-step > p { color: var(--ink-2); margin: 0 0 12px; }
+.connect-step .hint { margin-top: 10px; }
+.connect-step form { display: grid; gap: 6px; }
+.connect-step form .button { justify-self: start; margin-top: 10px; }
+.connect-values { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 12px 0 0; font-size: 0.88rem; }
+.connect-values dt { color: var(--muted); }
+.connect-values dd { margin: 0; overflow-wrap: anywhere; }
+.connect-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px; }
+.connect-about { margin-top: 28px; }
+.connect-about h2 { font-size: 1rem; margin-bottom: 8px; }
+.connect-about ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--ink-2); }
+@media (max-width: 560px) {
+  .connect-step { padding: 18px; }
+  .connect-values { grid-template-columns: minmax(0, 1fr); }
+  .connect-values dd { margin-bottom: 6px; }
+}
 .report + .banner, .page-head + .banner { margin: 0 0 16px; }
 
 @media (max-width: 760px) {
@@ -296,4 +323,9 @@ select {
 }
 @media (max-width: 560px) {
   .who { display: none; }
+  .topbar-right { gap: 12px; }
+  .brand { gap: 8px; }
+}
+@media (max-width: 380px) {
+  .topbar .brand-name { display: none; }
 }

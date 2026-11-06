@@ -4,6 +4,7 @@ import { api, getToken, setToken, whenSessionExpires } from './api.js'
 import Header from './components/Header.jsx'
 import Account from './pages/Account.jsx'
 import Auth from './pages/Auth.jsx'
+import Connect from './pages/Connect.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import ForgotPassword from './pages/ForgotPassword.jsx'
 import Landing from './pages/Landing.jsx'
@@ -65,6 +66,7 @@ export default function App() {
           <Route path="/forgot-password" element={user ? <Navigate to="/account" replace /> : <ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/scans/:id" element={signedInOnly(<ScanPage />)} />
+          <Route path="/connect" element={signedInOnly(<Connect user={user} />)} />
           <Route path="/account" element={signedInOnly(<Account user={user} onSession={applySession} />)} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

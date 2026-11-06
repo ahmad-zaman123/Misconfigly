@@ -37,4 +37,6 @@ def load_settings():
         }) or None,
         # Vercel sets the client address itself. Elsewhere the header could be forged.
         "behind_proxy": bool(os.environ.get("VERCEL")),
+        # The MisconfiglyScanner role from infra/misconfigly-service.yaml. Without it, AWS accounts can't be connected.
+        "aws_role_arn": os.environ.get("AWS_ROLE_ARN", ""),
     }

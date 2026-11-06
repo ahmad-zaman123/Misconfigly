@@ -73,6 +73,14 @@ CREATE TABLE IF NOT EXISTS findings (
     detail TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS findings_scan_idx ON findings (scan_id);
+-- Each user's link to their own AWS account. The ExternalId exists before the role does, so it can go in the stack.
+CREATE TABLE IF NOT EXISTS aws_connections (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    external_id TEXT NOT NULL UNIQUE,
+    role_arn TEXT,
+    account_id TEXT,
+    connected_at TIMESTAMPTZ
+);
 -- The checks a demo visitor has fixed in their simulated account.
 CREATE TABLE IF NOT EXISTS demo_fixes (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -353,3 +361,33 @@ class Store:
     def clear_demo_fixes(self, user_id):
         with self._connect() as db:
             db.execute("DELETE FROM demo_fixes WHERE user_id = %s", (user_id,))
+
+    # AWS connections
+
+    def get_connection(self, user_id, new_external_id):
+        """The user's connection, created with a fresh ExternalId the first time it is asked for."""
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO aws_connections (user_id, external_id) VALUES (%s, %s) ON CONFLICT (user_id) DO NOTHING",
+                (user_id, new_external_id()),
+            )
+            return db.execute(
+                "SELECT external_id, role_arn, account_id, connected_at FROM aws_connections WHERE user_id = %s", (user_id,)
+            ).fetchone()
+
+    def save_connection(self, user_id, role_arn, account_id):
+        with self._connect() as db:
+            return db.execute(
+                "UPDATE aws_connections SET role_arn = %s, account_id = %s, connected_at = now() WHERE user_id = %s "
+                "RETURNING external_id, role_arn, account_id, connected_at",
+                (role_arn, account_id, user_id),
+            ).fetchone()
+
+    def remove_connection(self, user_id, new_external_id):
+        """Forgets the role. A new ExternalId means a stack made with the old one can never be used again."""
+        with self._connect() as db:
+            return db.execute(
+                "UPDATE aws_connections SET role_arn = NULL, account_id = NULL, connected_at = NULL, external_id = %s "
+                "WHERE user_id = %s RETURNING external_id, role_arn, account_id, connected_at",
+                (new_external_id(), user_id),
+            ).fetchone()

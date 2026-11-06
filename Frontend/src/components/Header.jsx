@@ -22,6 +22,7 @@ export default function Header({ user, onSignOut }) {
         {user ? (
           <>
             <span className="who">{user.is_demo ? 'Demo account' : user.email}</span>
+            {!user.is_demo && <Link to="/connect" className="link-button">AWS</Link>}
             {!user.is_demo && <Link to="/account" className="link-button">Account</Link>}
             <button type="button" className="link-button" onClick={onSignOut}>Sign out</button>
           </>
