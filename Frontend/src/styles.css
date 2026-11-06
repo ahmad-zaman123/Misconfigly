@@ -275,6 +275,10 @@ select {
 }
 .copy:hover { border-color: var(--ink-2); }
 .empty-filter { padding: 20px; margin: 0; color: var(--ink-2); }
+.button.small { min-height: 34px; padding: 0 14px; font-size: 0.9rem; }
+.demo-fix { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 12px; }
+.demo-fix .hint { margin: 0; }
+.report + .banner, .page-head + .banner { margin: 0 0 16px; }
 
 @media (max-width: 760px) {
   .summary { grid-template-columns: 1fr; gap: 16px; }

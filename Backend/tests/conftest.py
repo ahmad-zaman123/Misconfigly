@@ -87,7 +87,7 @@ def build(store, database_url):
             store=store,
             send_email=send_email,
             verify_google=verify_google or refuse_google,
-            scan_target=scan_target or (lambda user: None),
+            scan_target=scan_target,
         )
         return TestClient(app)
 
