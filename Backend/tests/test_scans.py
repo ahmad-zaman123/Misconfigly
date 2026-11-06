@@ -24,7 +24,7 @@ def insecure_aws():
 @pytest.fixture
 def scanning(build, insecure_aws):
     """A client whose users all scan the misconfigured account, and one signed-in user."""
-    client = build(scan_target=lambda user: ScanTarget("test", insecure_aws, [REGION]))
+    client = build(scan_target=lambda user: ScanTarget("test", lambda: insecure_aws, [REGION]))
     return client, bearer(sign_up(client)["token"])
 
 
@@ -159,7 +159,7 @@ class BrokenSession:
 
 
 def test_a_scan_that_breaks_is_saved_as_failed_and_can_be_retried(build):
-    client = build(scan_target=lambda user: ScanTarget("test", BrokenSession(), [REGION]))
+    client = build(scan_target=lambda user: ScanTarget("test", BrokenSession, [REGION]))
     headers = bearer(sign_up(client)["token"])
     response = client.post("/api/scans", headers=headers)
     assert response.status_code == 502
@@ -171,7 +171,7 @@ def test_a_scan_that_breaks_is_saved_as_failed_and_can_be_retried(build):
 
 def test_scans_are_rate_limited(build, monkeypatch):
     monkeypatch.setitem(RATE_LIMITS, "scan", (1, timedelta(hours=1), "Slow down"))
-    client = build(scan_target=lambda user: ScanTarget("test", BrokenSession(), [REGION]))
+    client = build(scan_target=lambda user: ScanTarget("test", BrokenSession, [REGION]))
     headers = bearer(sign_up(client)["token"])
     client.post("/api/scans", headers=headers)
     response = client.post("/api/scans", headers=headers)

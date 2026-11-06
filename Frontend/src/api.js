@@ -72,4 +72,6 @@ export const api = {
   scans: () => request('/scans'),
   scan: (id) => request(`/scans/${encodeURIComponent(id)}`),
   startScan: () => request('/scans', { method: 'POST' }),
+  demoFix: (check_ids) => request('/demo/fixes', { method: 'POST', json: { check_ids } }),
+  resetDemo: () => request('/demo/fixes', { method: 'DELETE' }),
 }

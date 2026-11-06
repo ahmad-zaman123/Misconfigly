@@ -14,7 +14,7 @@ from .config import load_settings
 from .mailer import smtp_sender
 from .scanner import CHECKS, run_scan
 from .scanner.scoring import summarize
-from .scans import catalog, grouped_checks, no_target, scan_view
+from .scans import catalog, grouped_checks, scan_view
 from .store import Store
 
 logger = logging.getLogger(__name__)
@@ -38,11 +38,13 @@ RATE_LIMITS = {
     "reset_all": (200, timedelta(days=1), "Password reset is busy today. Please try again tomorrow."),
     "reset_use": (20, timedelta(hours=1), BUSY),
     "scan": (20, timedelta(hours=1), "You've run a lot of scans this hour. Please try again a little later."),
+    "demo_fix": (100, timedelta(hours=1), BUSY),
 }
 NO_TARGET = "Connect an AWS account before running a scan."
 SCAN_RUNNING = "A scan is already running. Wait for it to finish, then try again."
 SCAN_FAILED = "The scan couldn't finish because AWS didn't respond as expected. Please try again."
 SCAN_NOT_FOUND = "Scan not found"
+DEMO_ONLY = "Only demo accounts can apply fixes here. In your own account, follow the steps for each finding."
 Severity = Literal["critical", "high", "medium", "low"]
 
 
@@ -91,6 +93,10 @@ class ResetPassword(BaseModel):
     new_password: StorableText = Field(min_length=8, max_length=200)
 
 
+class DemoFixes(BaseModel):
+    check_ids: list[str] = Field(min_length=1, max_length=50)
+
+
 class PasswordChange(BaseModel):
     current_password: StorableText | None = Field(default=None, max_length=200)
     new_password: StorableText = Field(min_length=8, max_length=200)
@@ -105,11 +111,25 @@ def public_user(user):
     }
 
 
-def create_app(settings=None, *, store=None, send_email=None, verify_google=verify_google_token, scan_target=no_target):
+def demo_scan_target(store):
+    """Demo visitors scan their own simulated account. Nothing else is connected yet."""
+
+    def scan_target(user):
+        if not user["is_demo"]:
+            return None
+        from . import demo  # Loads moto, so only when a demo scan needs it.
+
+        return demo.target(user, store.demo_fixes(user["id"]))
+
+    return scan_target
+
+
+def create_app(settings=None, *, store=None, send_email=None, verify_google=verify_google_token, scan_target=None):
     settings = settings or load_settings()
     if send_email is None and settings["smtp"]:
         send_email = smtp_sender(**settings["smtp"])
     store = store or Store(settings["database_url"])
+    scan_target = scan_target or demo_scan_target(store)
     jwt_secret = settings["jwt_secret"]
 
     app = FastAPI(title="Misconfigly", docs_url="/api/docs", openapi_url="/api/openapi.json")
@@ -269,14 +289,41 @@ def create_app(settings=None, *, store=None, send_email=None, verify_google=veri
         if scan is None:
             raise HTTPException(status_code=409, detail=SCAN_RUNNING)
         try:
-            result = run_scan(target.session, target.regions)
+            result = run_scan(target.connect(), target.regions)
         except Exception:
             logger.exception("Scan %s failed", scan["id"])
             store.fail_scan(scan["id"], SCAN_FAILED)
             raise HTTPException(status_code=502, detail=SCAN_FAILED)
+        finally:
+            if target.disconnect:
+                target.disconnect()
         severities = {check_id: c.severity for check_id, c in CHECKS.items()}
         scan = store.finish_scan(scan["id"], result, summarize(result.findings), severities)
         return scan_view(scan)
+
+    def demo_user(user=Depends(current_user)):
+        if not user["is_demo"]:
+            raise HTTPException(status_code=403, detail=DEMO_ONLY)
+        return user
+
+    @app.get("/api/demo/fixes")
+    def demo_fixes(user=Depends(demo_user)):
+        return {"fixed": sorted(store.demo_fixes(user["id"]))}
+
+    @app.post("/api/demo/fixes")
+    def apply_demo_fixes(body: DemoFixes, user=Depends(demo_user)):
+        unknown = [c for c in body.check_ids if c not in CHECKS]
+        if unknown:
+            raise HTTPException(status_code=400, detail="There is no check called " + ", ".join(unknown[:3]))
+        enforce_limit("demo_fix", user["id"])
+        from .demo import with_dependencies
+
+        return {"fixed": sorted(store.add_demo_fixes(user["id"], with_dependencies(body.check_ids)))}
+
+    @app.delete("/api/demo/fixes")
+    def reset_demo_fixes(user=Depends(demo_user)):
+        store.clear_demo_fixes(user["id"])
+        return {"fixed": []}
 
     @app.get("/api/scans")
     def list_scans(user=Depends(current_user)):

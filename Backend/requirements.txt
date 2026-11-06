@@ -7,3 +7,4 @@ psycopg[binary]==3.3.6
 psycopg-pool==3.3.3
 PyJWT==2.15.1
 boto3==1.43.125
+moto[cloudtrail,config,ec2,iam,kms,logs,rds,s3]==5.2.5

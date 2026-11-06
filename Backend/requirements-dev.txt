@@ -2,4 +2,3 @@
 pytest==9.2.0
 pgserver==0.1.4
 httpx==0.28.1
-moto[cloudtrail,config,ec2,iam,kms,logs,rds,s3]==5.2.5

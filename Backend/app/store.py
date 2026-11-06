@@ -73,6 +73,12 @@ CREATE TABLE IF NOT EXISTS findings (
     detail TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS findings_scan_idx ON findings (scan_id);
+-- The checks a demo visitor has fixed in their simulated account.
+CREATE TABLE IF NOT EXISTS demo_fixes (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    check_id TEXT NOT NULL,
+    PRIMARY KEY (user_id, check_id)
+);
 """
 
 
@@ -327,3 +333,23 @@ class Store:
                 (scan_id,),
             ).fetchall()
         return scan, findings
+
+    # Demo fixes
+
+    def demo_fixes(self, user_id):
+        with self._connect() as db:
+            rows = db.execute("SELECT check_id FROM demo_fixes WHERE user_id = %s", (user_id,)).fetchall()
+        return {r["check_id"] for r in rows}
+
+    def add_demo_fixes(self, user_id, check_ids):
+        with self._connect() as db:
+            with db.cursor() as cursor:
+                cursor.executemany(
+                    "INSERT INTO demo_fixes (user_id, check_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                    [(user_id, check_id) for check_id in sorted(check_ids)],
+                )
+        return self.demo_fixes(user_id)
+
+    def clear_demo_fixes(self, user_id):
+        with self._connect() as db:
+            db.execute("DELETE FROM demo_fixes WHERE user_id = %s", (user_id,))

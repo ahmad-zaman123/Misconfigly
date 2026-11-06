@@ -94,7 +94,7 @@ function Finding({ finding, title }) {
   )
 }
 
-function CheckRow({ check }) {
+function CheckRow({ check, demo }) {
   const [open, setOpen] = useState(false)
   const failing = check.findings.filter((f) => f.status === 'fail')
   const others = check.findings.filter((f) => f.status !== 'fail')
@@ -123,6 +123,14 @@ function CheckRow({ check }) {
       {open && (
         <div className="check-body" id={panelId}>
           <p className="why">{check.why}</p>
+          {demo && check.status === 'fail' && (
+            <div className="demo-fix">
+              <button type="button" className="button small" onClick={() => demo.onFix(check)} disabled={demo.busy}>
+                {demo.fixing === check.id ? 'Fixing and scanning again…' : 'Fix this in the demo'}
+              </button>
+              <span className="hint">Applies the fix to the simulated account, then scans it again.</span>
+            </div>
+          )}
           {failing.length > 0 && (
             <ul className="findings">
               {failing.map((f) => <Finding key={`${f.region}-${f.resource}`} finding={f} title={check.title} />)}
@@ -144,7 +152,7 @@ function CheckRow({ check }) {
   )
 }
 
-export default function ScanReport({ report, onRescan, busy, error }) {
+export default function ScanReport({ report, onRescan, busy, error, demo }) {
   const { scan, checks, services } = report
   const summary = scan.summary || {}
   const [status, setStatus] = useState('fail')
@@ -208,6 +216,11 @@ export default function ScanReport({ report, onRescan, busy, error }) {
             <button type="button" className="button primary" onClick={onRescan} disabled={busy}>
               {busy ? 'Scanning…' : 'Run a new scan'}
             </button>
+            {demo && (
+              <button type="button" className="link-button small" onClick={demo.onReset} disabled={busy}>
+                Undo my fixes
+              </button>
+            )}
             {error && <p className="banner error" role="alert">{error}</p>}
           </div>
         )}
@@ -239,7 +252,7 @@ export default function ScanReport({ report, onRescan, busy, error }) {
 
       {shown.length ? (
         <ul className="checks">
-          {shown.map((check) => <CheckRow key={check.id} check={check} />)}
+          {shown.map((check) => <CheckRow key={check.id} check={check} demo={demo} />)}
         </ul>
       ) : (
         <p className="card empty-filter">

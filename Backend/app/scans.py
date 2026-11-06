@@ -1,6 +1,7 @@
 """Running scans for users and shaping stored findings for the API."""
 
 from dataclasses import dataclass
+from typing import Callable
 
 from .scanner import CHECKS, SEVERITIES
 from .scanner.fixes import FIXES, finding_values, render
@@ -12,15 +13,20 @@ SEVERITY_ORDER = {name: i for i, name in enumerate(SEVERITIES)}
 
 @dataclass(frozen=True)
 class ScanTarget:
-    """What a scan runs against: a boto3 session, and the regions to look at (None means every enabled region)."""
+    """What a scan runs against.
+
+    connect() returns a boto3 session once the scan has started, and disconnect() runs after it, even if it failed.
+    regions=None means every region enabled in the account.
+    """
 
     source: str
-    session: object
+    connect: Callable[[], object]
     regions: list[str] | None = None
+    disconnect: Callable[[], None] | None = None
 
 
 def no_target(user):
-    """Used until an AWS account is connected."""
+    """Used when nothing is connected for this user."""
     return None
 
 
