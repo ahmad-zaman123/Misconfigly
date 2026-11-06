@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>(function(){var t=null;try{t=localStorage.getItem('theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}document.documentElement.setAttribute('data-theme',t)})();</script>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f3f4f1" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0e1216" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="Misconfigly scans your AWS account for security misconfigurations, such as public S3 buckets, missing MFA and open ports, and shows how to fix each one." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <title>Misconfigly — find AWS security misconfigurations</title>
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Misconfigly" />
+    <meta property="og:title" content="Misconfigly — find AWS security misconfigurations" />
+    <meta property="og:description" content="Connect an AWS account with read-only access and see every misconfiguration, why it matters and how to fix it. Try the live demo." />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
