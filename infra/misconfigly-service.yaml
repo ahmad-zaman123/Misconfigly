@@ -1,0 +1,59 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Misconfigly's own identity in AWS. The production backend on Vercel signs in through Vercel's OIDC provider, so no
+  AWS access keys exist anywhere. The role can do one thing: assume the MisconfiglyAudit role customers create.
+
+Parameters:
+  VercelTeamSlug:
+    Type: String
+    AllowedPattern: "[a-z0-9-]+"
+    Description: The team part of your Vercel URL, as in vercel.com/TEAM_SLUG
+  VercelProjectName:
+    Type: String
+    AllowedPattern: "[a-z0-9._-]+"
+    Description: The name of the backend project on Vercel
+
+Resources:
+  VercelOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url:
+        Fn::Sub: https://oidc.vercel.com/${VercelTeamSlug}
+      ClientIdList:
+        - Fn::Sub: https://vercel.com/${VercelTeamSlug}
+
+  ScannerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: MisconfiglyScanner
+      Description: Used by the Misconfigly backend on Vercel to assume customers' read-only audit roles
+      MaxSessionDuration: 3600
+      # A JSON string, because the condition keys contain the team slug.
+      AssumeRolePolicyDocument:
+        Fn::Sub: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": {"Federated": "${VercelOidcProvider}"},
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {"StringEquals": {
+                "oidc.vercel.com/${VercelTeamSlug}:aud": "https://vercel.com/${VercelTeamSlug}",
+                "oidc.vercel.com/${VercelTeamSlug}:sub": "owner:${VercelTeamSlug}:project:${VercelProjectName}:environment:production"
+              }}
+            }]
+          }
+      Policies:
+        - PolicyName: AssumeCustomerAuditRoles
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: arn:aws:iam::*:role/MisconfiglyAudit
+
+Outputs:
+  ScannerRoleArn:
+    Description: Set this as AWS_ROLE_ARN on the backend project in Vercel
+    Value:
+      Fn::GetAtt: [ScannerRole, Arn]

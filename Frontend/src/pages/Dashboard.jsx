@@ -12,13 +12,15 @@ export default function Dashboard({ user }) {
   const [error, setError] = useState('')
   const [fixing, setFixing] = useState('')
   const [notice, setNotice] = useState('')
+  const [connection, setConnection] = useState(null)
 
   const load = useCallback(async () => {
+    if (!user.is_demo) setConnection(await api.connection())
     const { scans } = await api.scans()
     setLatest(scans[0] || null)
     const done = scans.find((s) => s.status === 'done')
     setReport(done ? await api.scan(done.id) : null)
-  }, [])
+  }, [user.is_demo])
 
   useEffect(() => {
     load()
@@ -59,6 +61,7 @@ export default function Dashboard({ user }) {
     if (scan) setNotice(`Your fixes were undone. Score ${scan.summary.score}.`)
   }
 
+  const needsConnection = !user.is_demo && connection && !connection.connected
   const demo = user.is_demo && report?.scan.source === 'demo' ? { onFix: fixInDemo, onReset: resetDemo, busy, fixing } : null
 
   return (
@@ -88,11 +91,23 @@ export default function Dashboard({ user }) {
       )}
       {notice && <p className="banner success" role="status">{notice}</p>}
 
-      {!loading && !loadError && report && (
-        <ScanReport report={report} onRescan={() => runScan()} busy={busy} error={error} demo={demo} />
+      {!loading && !loadError && needsConnection && (
+        <section className="card empty">
+          <h2>{report ? 'No AWS account connected' : 'Connect your AWS account'}</h2>
+          <p>
+            {report
+              ? 'Connect an account again to run new scans. Your past scans are still here.'
+              : 'Misconfigly scans your account through a read-only role you create with one CloudFormation stack. It takes about two minutes and needs no access keys.'}
+          </p>
+          <Link to="/connect" className="button primary">Connect AWS</Link>
+        </section>
       )}
 
-      {!loading && !loadError && !report && (
+      {!loading && !loadError && report && (
+        <ScanReport report={report} onRescan={needsConnection ? null : () => runScan()} busy={busy} error={error} demo={demo} />
+      )}
+
+      {!loading && !loadError && !report && !needsConnection && (
         <section className="card empty">
           <h2>No scans yet</h2>
           <p>

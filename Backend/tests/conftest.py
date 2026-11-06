@@ -81,13 +81,14 @@ def mailer():
 def build(store, database_url):
     """Builds a TestClient. Pass setting overrides, send_email, verify_google and scan_target."""
 
-    def _build(send_email=None, verify_google=None, scan_target=None, **overrides):
+    def _build(send_email=None, verify_google=None, scan_target=None, aws=None, **overrides):
         app = create_app(
             make_settings(database_url, **overrides),
             store=store,
             send_email=send_email,
             verify_google=verify_google or refuse_google,
             scan_target=scan_target,
+            aws=aws,
         )
         return TestClient(app)
 

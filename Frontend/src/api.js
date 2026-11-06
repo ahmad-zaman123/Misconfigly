@@ -74,4 +74,7 @@ export const api = {
   startScan: () => request('/scans', { method: 'POST' }),
   demoFix: (check_ids) => request('/demo/fixes', { method: 'POST', json: { check_ids } }),
   resetDemo: () => request('/demo/fixes', { method: 'DELETE' }),
+  connection: () => request('/connection'),
+  connect: (role_arn) => request('/connection', { method: 'POST', json: { role_arn } }),
+  disconnect: () => request('/connection', { method: 'DELETE' }),
 }

@@ -10,11 +10,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import AfterValidator, BaseModel, EmailStr, Field
 
+from .aws import AwsAccess, ConnectionFailed, new_external_id, parse_role_arn
 from .config import load_settings
 from .mailer import smtp_sender
 from .scanner import CHECKS, run_scan
 from .scanner.scoring import summarize
-from .scans import catalog, grouped_checks, scan_view
+from .scans import ScanTarget, catalog, grouped_checks, scan_view
 from .store import Store
 
 logger = logging.getLogger(__name__)
@@ -39,8 +40,11 @@ RATE_LIMITS = {
     "reset_use": (20, timedelta(hours=1), BUSY),
     "scan": (20, timedelta(hours=1), "You've run a lot of scans this hour. Please try again a little later."),
     "demo_fix": (100, timedelta(hours=1), BUSY),
+    "connect": (10, timedelta(minutes=15), "Too many attempts to connect. Please try again in a few minutes."),
 }
 NO_TARGET = "Connect an AWS account before running a scan."
+DEMO_CANT_CONNECT = "Demo accounts scan a simulated AWS account. Create an account to connect your own."
+TEMPLATE_PATH = "/aws/misconfigly-audit-role.yaml"
 SCAN_RUNNING = "A scan is already running. Wait for it to finish, then try again."
 SCAN_FAILED = "The scan couldn't finish because AWS didn't respond as expected. Please try again."
 SCAN_NOT_FOUND = "Scan not found"
@@ -93,6 +97,10 @@ class ResetPassword(BaseModel):
     new_password: StorableText = Field(min_length=8, max_length=200)
 
 
+class AwsRole(BaseModel):
+    role_arn: str = Field(min_length=20, max_length=2048)
+
+
 class DemoFixes(BaseModel):
     check_ids: list[str] = Field(min_length=1, max_length=50)
 
@@ -111,25 +119,53 @@ def public_user(user):
     }
 
 
-def demo_scan_target(store):
-    """Demo visitors scan their own simulated account. Nothing else is connected yet."""
+def default_scan_target(store, aws):
+    """Demo visitors scan their simulated account. Everyone else scans the AWS account they connected, if any."""
 
-    def scan_target(user):
-        if not user["is_demo"]:
+    def scan_target(user, oidc_token=None):
+        if user["is_demo"]:
+            from . import demo  # Loads moto, so only when a demo scan needs it.
+
+            return demo.target(user, store.demo_fixes(user["id"]))
+        connection = store.get_connection(user["id"], new_external_id)
+        if not connection["role_arn"] or not aws.configured:
             return None
-        from . import demo  # Loads moto, so only when a demo scan needs it.
 
-        return demo.target(user, store.demo_fixes(user["id"]))
+        def connect():
+            return aws.customer_session(oidc_token, connection["role_arn"], connection["external_id"], user["id"])
+
+        return ScanTarget("aws", connect)  # Every region the account has turned on.
 
     return scan_target
 
 
-def create_app(settings=None, *, store=None, send_email=None, verify_google=verify_google_token, scan_target=None):
+def oidc_token_of(request):
+    """Vercel puts a short-lived OIDC token on each request. It isn't there locally."""
+    return request.headers.get("x-vercel-oidc-token")
+
+
+def connection_view(connection, aws):
+    return {
+        "available": aws.configured,
+        "connected": bool(connection["role_arn"]),
+        "external_id": connection["external_id"],
+        "role_arn": connection["role_arn"],
+        "account_id": connection["account_id"],
+        "connected_at": connection["connected_at"],
+        "scanner_role_arn": aws.scanner_role_arn or None,
+        "template_path": TEMPLATE_PATH,
+    }
+
+
+def create_app(
+    settings=None, *, store=None, send_email=None, verify_google=verify_google_token, scan_target=None, aws=None
+):
     settings = settings or load_settings()
     if send_email is None and settings["smtp"]:
         send_email = smtp_sender(**settings["smtp"])
     store = store or Store(settings["database_url"])
-    scan_target = scan_target or demo_scan_target(store)
+    aws = aws or AwsAccess(settings.get("aws_role_arn", ""), on_vercel=settings["behind_proxy"])
+    scan_target = scan_target or default_scan_target(store, aws)
     jwt_secret = settings["jwt_secret"]
 
     app = FastAPI(title="Misconfigly", docs_url="/api/docs", openapi_url="/api/openapi.json")
@@ -280,8 +316,8 @@ def create_app(settings=None, *, store=None, send_email=None, verify_google=veri
         return {"checks": catalog()}
 
     @app.post("/api/scans", status_code=201)
-    def start_scan(user=Depends(current_user)):
-        target = scan_target(user)
+    def start_scan(request: Request, user=Depends(current_user)):
+        target = scan_target(user, oidc_token_of(request))
         if target is None:
             raise HTTPException(status_code=409, detail=NO_TARGET)
         enforce_limit("scan", user["id"])
@@ -290,6 +326,9 @@ def create_app(settings=None, *, store=None, send_email=None, verify_google=veri
             raise HTTPException(status_code=409, detail=SCAN_RUNNING)
         try:
             result = run_scan(target.connect(), target.regions)
+        except ConnectionFailed as error:
+            store.fail_scan(scan["id"], error.message)
+            raise HTTPException(status_code=502, detail=error.message)
         except Exception:
             logger.exception("Scan %s failed", scan["id"])
             store.fail_scan(scan["id"], SCAN_FAILED)
@@ -300,6 +339,32 @@ def create_app(settings=None, *, store=None, send_email=None, verify_google=veri
         severities = {check_id: c.severity for check_id, c in CHECKS.items()}
         scan = store.finish_scan(scan["id"], result, summarize(result.findings), severities)
         return scan_view(scan)
+
+    def own_account_user(user=Depends(current_user)):
+        if user["is_demo"]:
+            raise HTTPException(status_code=403, detail=DEMO_CANT_CONNECT)
+        return user
+
+    @app.get("/api/connection")
+    def get_connection(user=Depends(own_account_user)):
+        return connection_view(store.get_connection(user["id"], new_external_id), aws)
+
+    @app.post("/api/connection")
+    def connect_account(body: AwsRole, request: Request, user=Depends(own_account_user)):
+        enforce_limit("connect", user["id"])
+        connection = store.get_connection(user["id"], new_external_id)
+        try:
+            account_id = parse_role_arn(body.role_arn)
+            # Proves the role works before saving it: the stack exists, trusts Misconfigly and has this ExternalId.
+            aws.customer_session(oidc_token_of(request), body.role_arn, connection["external_id"], user["id"])
+        except ConnectionFailed as error:
+            raise HTTPException(status_code=400, detail=error.message)
+        return connection_view(store.save_connection(user["id"], body.role_arn.strip(), account_id), aws)
+
+    @app.delete("/api/connection")
+    def disconnect_account(user=Depends(own_account_user)):
+        store.get_connection(user["id"], new_external_id)
+        return connection_view(store.remove_connection(user["id"], new_external_id), aws)
 
     def demo_user(user=Depends(current_user)):
         if not user["is_demo"]:
